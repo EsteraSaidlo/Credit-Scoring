@@ -1,0 +1,1194 @@
+---
+title: "Projekt2"
+author: "Estera Saidło"
+date: "5 czerwca 2019"
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+    fig_width: 11
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Wstęp
+
+Przed udzieleniem kredytu bank weryfikuje wiarygodność podmiotu ubiegającego się o kredyt. Scoring kredytowy jest metodą, która tę wiarygodność sprawdza. Ocena scoringowa polega na określeniu wiarygodności kredytowej klienta na podstawie porównania jego profilu z profilem klientów, którzy już otrzymali kredyty. Im większe podobieństwo profilu wnioskodawcy do osoby, która otrzymała kredyt tym większa szansa na jego otrzymanie. 
+Niniejszy projekt jest poświęcony budowie modelu scoringowego, który będzie przewidywał czy wnioskodawca otrzyma kredyt czy też nie.
+
+Do budowy modelu zostaną użyte takie metody jak:
+
+- regresja logistyczna,
+- Bagging,
+- Boosting,
+- Random Forest,
+- Naive Bayes.
+
+Metody postępowania z outlierami użyte w projekcie:
+
+- usunięcie,
+- zastąpienie NA i prognozowanie ich za pomocą metody k-najbliższych sąsiadów.
+
+Metody postępowania z wartościami brakującymi użyte w projekcie:
+
+- usunięcie,
+- prognozowanie metodą k-najbliższych sąsiadów.
+
+## Opis użytych metod
+
+### regresja logistyczna
+Regresja logistyczna służy do badania wpływu niezależnych zmiennych objaśniających ${x_1,…,x_n}$ na zmienną objaśnianą jakościową. Zmienna objaśniana najczęściej przyjmuje dwie wartości: 
+
+-	1 – rozważana sytuacja będzie miała miejsce; 
+-	0 – rozważana sytuacja nie będzie miała miejsca. 
+
+Wynik regresji logistycznej wyraża prawdopodobieństwo zajścia pewnego zdarzenia i przyjmuje wartość z przedziału 0-1. Aby zaklasyfikować obserwację do konkretnego scenariusza, ustala się tzw. próg odcięcia (ang.: cut off ). Na przykład $P(Y=1|X)>0.5$ oznacza, że jeżeli prawdopodobieństwo, że zmienna $Y$ przyjmie wartość 1 jest większe niż 50%, pod warunkiem zajścia zdarzenia $X$, zmiennej $Y$ zostanie przypisana wartość 1, w przeciwnym razie 0. 
+
+### Bagging
+Jest to metoda agregacji bootstrapowej o architekturze równoległej - opiera się na wylosowaniu ze zwracaniem n-elementowych prób uczących $U_1,…,U_v$  ze zbioru treningowego $U$ i budowie $V$ modeli wyjściowych. Na podstawie każdej próby budowany jest model $D_i$, gdzie $i∈1,…,v$ . Do stworzenia modelu zagregowanego $D^*$używana jest funkcja agregacji $ψ$. Największą zaletą tej metody jest redukcja wariancji modeli wyjściowych. 
+
+### Boosting
+Jest to metoda agregacji oparta na architekturze szeregowej. Polega na poprawieniu dokładności predykcji modelu $D^*$ przez modyfikowanie słabych modeli wyjściowych. Opiera się to na wykorzystaniu podwójnego systemu wag. W pierwszym systemie obserwacje, które zostały zaklasyfikowane niepoprawnie otrzymują wyższe wagi, drugi natomiast nawiązuje do modeli wyjściowych – każdy model otrzymuje wagę proporcjonalną do jego błędu predykcji. Wagi modeli mniej precyzyjnych zostają zmniejszone, zaś tych lepszych zwiększone.
+
+### Random Forest 
+Jest to metoda, która polega na tym, że oprócz bootstrapowego losowania obserwacji do prób uczących $U_1,…,U_v$(Bagging), wykorzystuje się również losowy dobór zmiennych do modeli wyjściowych $D_1,…,D_v$.
+
+### Naive Bayes
+
+Klasyfikacja Bayesowska jest klasyfikacją statystyczną. Pozwala przewidzieć prawdopodobieństwo przynależności obiektu do klasy. Opiera się na $twierdzeniu Bayesa$. Rozważana jest hipoteza, że obiekt o właściwości $X$ należy do klasy $C$. Z punktu widzenia zadania klasyfikacji pożądane jest by obliczyć prawdopodobieństwo $P(C|X)$ tego, że obiekt o właściwości $X$ należy do klasy $C$.
+
+Twierdzenie Bayesa pokazuje, w jaki sposób obliczyć prawdopodobieństwo warunkowe $P(C|X)$, jeśli znane są prawdopodobieństwa: warunkowe $P(X|C)$ oraz bezwarunkowe $P(C)$ i $P(X)$.
+Prawdopodobieństwa: $P(X|C)$, $P(C)$ oraz $P(X)$ mogą być bezpośrednio wyliczone z danych zgromadzonych w treningowym zbiorze danych.
+
+Twierdzenie Bayesa:
+
+$$p(C|X) = \frac{p(C)p(X|C)}{p(X)}$$
+
+### Metoda imputacji k-najbliższych sąsiadów
+
+Polega na grupowaniu k obserwacji o podobnych parametrach i wstawianie mediany w miejsce brakującej wartości w przypadku zmiennej numerycznej i wartości występującej najczę-ściej w przypadku zmiennej kategorycznej. Jeżeli maksymalna liczba wystąpień zmiennej kategorycznej nie jest jednoznaczna, NA zostaje zastąpione przez losową wartość z rozważanego obszaru. Za k zostanie przyjęta wartość 6.
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(naniar)
+library(kableExtra)
+library(ggplot2)
+library(gridExtra)
+library(plyr)
+library(pROC)
+library(tidyr)
+library(dummies)
+library(randomForest)
+library(sjmisc)
+library(e1071)
+library(dismo)
+```
+
+
+# Przedstawienie danych 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Wczytanie danych
+kredyt <- read.csv("C:/Users/Esterka/Desktop/kredyt_indie.csv", sep = ";", dec = ".")
+colnames(kredyt) <- c("Loan_ID","Gender", "Married","Dep", "Educ", "Self_Emp","AppInc", "CoappInc", "Amount", "Term", "C_Hist", "Prop_Ar", "Status")
+```
+
+Dane użyte do badania prezentują się następująco:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+kable(kredyt) %>% kable_styling(full_width = F, position = "center", font_size = 9) %>%
+  scroll_box(width = "80%", height = "200px")
+```
+\
+Omówienie zmiennych: 
+
+- <b>Loan_ID</b> - jest to zmienna, której każda obserwacja jest unikatowa - rozróżnia wnioskodawców,
+- <b>Gender</b> - płeć wnioskodawcy(Female - kobieta,Male - mężczyzna),
+- <b>Married</b> - informuje czy osoba wnioskująca jest w związku małżeńskim(Yes) czy nie (No),
+- <b>Dep</b> - informuje czy osoba ma na utrzymaniu inne osoby i jeśli tak to ile(0-3+),
+- <b>Edu</b> - informuje czy osoba skończyła studia wyższe (Graduate) czy nie (Not Graduate),
+- <b>Self_Emp</b> - czy wnioskodawca jest samozatrudniony(Yes) czy nie (No),
+- <b>AppInc</b> - dochód wnioskodawcy,
+- <b>CoappInc</b> - dochód poręczyciela,
+- <b>Amount</b> - kwota kredytu - w tysiącach $,
+- <b>Term</b> - okres jakiego dotyczy kredyt - w miesiącach,
+- <b>C_Hist</b> - czy historia kredytowa spełnia wytczne(1) czy nie (0),
+- <b>Prop_Ar</b> - czy wnioskodawca ma posiadłość na wsi(Rural), na terenie półmiejskim(Semiurban) czy miejskim(Urban),
+- <b>Status</b> - informacja o tym czy kredyt został przyznany (Y) czy nie (N).
+
+Po przejrzeniu zbioru danych można zauważyć, że posiada on wybrakowane obserwacje - nie tylko w postaci NA lecz również w postaci pustych komórek. Aby łatwiej było przeprowadzać operacje związane z wartościami brakującymi w zbiorze danych, wszystkie braki zostaną zamienione na NA.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt[kredyt==""] <- NA
+```
+
+Ponadto zostanie usunięta zmienna `Loan_ID`, która nie będzie pomocna w badaniu ze względu na to, że każda jej wartość jest jest unikatowa i nieporównywalna,  wartość 3+ zmiennej `Dep` (liczba osób na utrzymaniu) zostanie zamieniona na 3.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt <- kredyt[,-1]
+kredyt$Dep <- revalue(kredyt$Dep, c("3+"="3"))
+```
+
+Poniżej zostaną zaprezentowane statystyki opisowe:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=6}
+summary(kredyt)
+```
+
+Jest ponad czterokrotna przewaga mężczyzn wnioskujących o kredyt niż kobiet i ta zmienna ma 13 brakujących obserwacji. Jest również prawie dwa razy więcej osób w związku małżeńskim, a o 3 osobach nie ma takiej informacji. Najwięcej osób nie ma nikogo na utrzymaniu, a najmniej ma 3 lub więcej osób, natomiast brakujących obserwacji jest 15. 480 osób skończyło studia wyższe a 500 nie jest samozatrudniona, o 32 osobach nie ma takiej informacji. Dochody wnioskodawców oscylują w przedziale 150 - 81000, a dochód poręczycieli w przedziale 0 - 41667. Ciekawe jest, że ponad 25% poręczycieli ma dochód równy 0. Kwota pożyczki jest z przedzaiłu 9 - 700 tysięcy, przy czym 75% wnioskodawców nie stara się o kredyt większy niż 168 tysięcy, już w tym miejscu można wywnioskować, że wartość 700 tysiecy będzie outlierem. Podobnie jest z maksymalnymi wartościami dotyczącymi dochodu wnioskodawców i poręczycieli. Minimalny okres spłaty kredytu to 12 miesięcy, a maksymalnie jest to 480 miesięcy, czyli 40 lat - o 14 osobach nie widnieje taka informacja w zbiorze danych. Ponad 75% obserwacji, które mają kompletną wartość w zmiennej C_Hist ma historię kredytową spełniającą wytyczne. Najwięcej osób ma posiadłość na teranach półmiejskich, najmniej na wsi, jednak nie są to duże różnice. Około 30% wnioskodawców nie otrzymało kredytu. Z tego względu próg odcięcia będzie ustawiany na wartość 0.3. 
+
+Zmienna `Status` jest zmienną prognozowaną, więc zostanie zmieniona na zmienną zero-jedynkową, gdzie wartość 1 reprezentuje osoby, które nie otrzymały kredytu, a 0 te, które otrzymały.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt$Status <- ifelse(kredyt$Status=="Y",0,1)
+```
+
+
+##Brakujące wartości
+
+Jest aż 7 zmiennych, które posiadają brakujące wartości w obserwacjach. 
+Poniżej zostanie przedstawione rozłożenie wartości brakujących.
+
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+vis_miss(kredyt[,c(1:3,5,8:10)], cluster = T)
+```
+
+Można zauważyć, że jak nie ma informacji o tym czy jest ktoś w związku małżeńskim to nie ma także informacji o liczbie podopiecznych - niewiadomo czy w związku małżeńskim = niewiadomo czy ma dzieci, choć nie jest to reguła. Najwięcej osób nie posiada informacji o spełnieniu wytycznych historii kredytowej - 8.14% i o tym czy prowadzi własną działalność - 5.21%. Widać także, że obserwacje mają maksymalnie trzy brakujące wartości. 
+
+##Outliery
+
+Poniższe boxploty obrazują jak prezentują się outliery w rozważanym zbiorze danych.
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+#outliery
+
+w1 <-  ggplot(kredyt,aes(y=AppInc)) +
+  ggtitle("Dochód wnioskodawcy") + geom_boxplot(fill="#56B4E9")
+
+w2 <- ggplot(kredyt,aes(y=CoappInc) ) + 
+  ggtitle("Dochód poręczyciela") + geom_boxplot(fill="#FF9999")
+
+w3 <- ggplot(kredyt,aes(y=Amount)) + 
+  ggtitle("Kwota kredytu")  + geom_boxplot(fill="#CC6666")
+
+w4 <- ggplot(kredyt,aes(y=Term)) + 
+  ggtitle("Okres spłaty kredytu")  + geom_boxplot(fill="#E69F00")
+
+grid.arrange(w1, w2, w3, w4,  ncol = 2, nrow = 2)
+```
+
+Zmienna przedstawiająca okres spłaty kredytu ma ponad 75% obserwacji o wartości 360, z tego względu każda inna wartość jest traktowana jako wartość odstająca. Nie zostaną one usunięte, a jeśli okaże się, że zmienna `Term` nie ma silnej mocy dyskryminacyjnej to zostanie ona wykluczona z modelu. W przypadku pozostałych zmiennych, w których występuje problem outlierów, wartości odstające zostaną usunięte, a w drugim przypadku zamienione na NA i zaprognozowane.
+
+# Część właściwa badania
+
+## Usunięcie outlierów
+
+W tym punkcie zostaną usunięte wszystkie wartości ze zmiennych `AppInc`, `CoappInc` oraz `Amount`, które mogłyby wprowadzać jakiekolwiek zakłocenia w zbiorze.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt <- kredyt[-which(kredyt$AppInc>=10000),]
+kredyt <- kredyt[-which(kredyt$CoappInc>=5000),]
+kredyt <- kredyt[-which(kredyt$Amount>=250),]
+```
+
+### Usunięcie brakujących wartości 
+
+Usunięcie wszystkich obserwacji, które posiadają brakujące wartości. 
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt <- na.omit(kredyt)
+```
+
+Podział zbioru na uczący i testowy za pomocą 10-krotnej walidacji krzyżowej:
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+set.seed(123)
+
+kredyt<-kredyt[sample(nrow(kredyt)),]
+
+#utworzenie 10 części o jednakowej wielkości
+folds <- cut(seq(1,nrow(kredyt)),breaks=10,labels=FALSE)
+
+#10-krotna walidacja krzyżowa
+for(i in 1:10){
+  #Podział danych na części za pomocą funkcji which()
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- kredyt[testIndexes, ]
+  train <- kredyt[-testIndexes, ]
+}
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=6}
+summary(train)
+summary(test)
+```
+
+Statystyki zbioru treningowego i testowego są porównywalne. Rozkład wartości zmiennej `Status` jest taki sam, podobnie w przypadku zmiennej `C_Hist`. Patrząc na średnie i mediany zmiennych numerycznych można je uznać za podobne. Oczywiście nie da się uniknąć odchyleń przy podziale zbiorów.
+
+#### regresja logistyczna 
+
+Funkcja używana do budowy modelu regresji logistycznej:
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+set.seed(123)
+logistic_regression <- glm(Status~., family = "binomial", data = train)
+```
+
+Funkcja, która za pomocą metody krokowej wstecznej wybiera do modelu tylko te zmienne, które są istotne.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+set.seed(123)
+logistic_regression_final <- step(logistic_regression, direction = "backward", trace=FALSE, k=3 ) 
+summary(logistic_regression_final)
+```
+
+Zmiennymi, które zostały włączone do modelu są: `Married`, `C_Hist` oraz `Prop_Ar`. Największą moc dyskryminacyjną ma zmienna `C_Hist`.
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+#zbiór testowy
+prob_test <- predict(logistic_regression_final, test, type = "response")
+pred_rl_test <- ifelse(prob_test>0.3,1,0)
+confM_test <- table(pred_rl_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+prob_train <- predict(logistic_regression_final, train, type = "response")
+pred_rl_train <- ifelse(prob_train>0.3,1,0)
+confM_train <- table(pred_rl_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_rl_test))
+ROC_train <- roc(train$Status,as.numeric(pred_rl_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="regresja logistyczna - test")
+ p2 <- plot(ROC_train,main="regresja logistyczna - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu regresji logistycznej
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_rl_test <- data.frame(zbior = "testowy",metoda = "regresja logistyczna", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_rl_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_rl_train <- data.frame(zbior = "treningowy",metoda = "regresja logistyczna", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_rl_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Dokładność na zbiorze testowym prezentuje się lepiej niż na zbiorze treningowym i jest to różnica 1% wynikająca z lepszej specyficzności - poprawnym zaklasyfikowaniu tych, którzy otrzymali kredyt. Jeśli chodzi o czułość - poprawną klasyfikację tych, którzy nie otrzymali kredytu, to lepiej wypada zbiór treningowy. Wartość AUC - wartość pola pod krzywą ROC, która wskazuje na przypadkową klasyfikację w przypadku wartości 0.5, jest lepsza na zbiorze trengowym. Ogólnie wyniki predykcji na zbiorze testowym i treningowym nie różnią się znacząco.
+
+#### Random Forest
+
+Funkcja do tworzenia modelu Random Forest na podstawie optymalnej liczby drzew, wybranej dzięki minimalizacji błedu OOB - średniego błędu prognozowania na każdej próbce treningowej $xᵢ$ , wykorzystujący tylko drzewa, które nie miały $ xᵢ$ w próbce bootstrap.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+set.seed(123)
+oob = c()
+for(i in 1:500){
+  classifier <-  randomForest(as.factor(Status)~.,data = train,
+                              ntree = i)
+  oob[i] <- classifier$err.rate[nrow(classifier$err.rate), "OOB"]
+}
+opt_i <- which.min(oob)
+opt_i
+random_Forest <- randomForest::randomForest(as.factor(Status)~.,data = train, ntree = opt_i, keep.forest=TRUE,na.action=na.roughfix)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_rF_test <- predict(random_Forest, test, type = "response")
+confM_test <- table(pred_rF_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_rF_train <- predict(random_Forest, train, type = "response")
+confM_train <- table(pred_rF_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_rF_test))
+ROC_train <- roc(train$Status,as.numeric(pred_rF_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Random Forest - test")
+ p2 <- plot(ROC_train,main="Random Forest - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Random Forest
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_rF_test <- data.frame(zbior = "testowy",metoda = "Random Forest", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_rF_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_rF_train <- data.frame(zbior = "treningowy",metoda = "Random Forest", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_rF_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Wyniki modelu na zbiorze treningowym są niemalże idealne - wartość ACC i AUC mają 99%, specyficzność jest równa 1, a czułość 0.97. Tak dobre wyniki świadczą o przeuczeniu modelu. Może to wynikać ze zbyt małej próbki. Zbiór testowy wykazuje się bardzo dobrą specyficznością - poprawną klasyfikacją tych, którzy otrzymali kredyt. Natomiast patrząc na czułość możnaby uznać, że klasyfikacja tych, którzy nie otrzymali kredyu jest przypadkowa.
+
+#### Bagging
+Funkcja użyta do budowy modelu baggingu: 
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+set.seed(123)
+bagging <- ipred::bagging(Status~., data=train, nbag =100)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_bag_test <- predict(bagging, test, type = "class")
+pred_bag_test <- ifelse(pred_bag_test>0.3, 1, 0)
+confM_test <- table(pred_bag_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+prob_train <- predict(bagging, train, type = "class")
+pred_bag_train <- ifelse(prob_train>0.3,1,0)
+confM_train <- table(pred_bag_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_bag_test))
+ROC_train <- roc(train$Status,as.numeric(pred_bag_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Bagging - test")
+ p2 <- plot(ROC_train,main="Bagging - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Bagging
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_bag_test <- data.frame(zbior = "testowy",metoda = "Bagging", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_bag_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_bag_train <- data.frame(zbior = "treningowy",metoda = "Bagging", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_bag_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Wartości na zbiorze treningowym oscylują w granicach 90%. Zarówno czułość - 87% jak i specyficzność - 92% nie przypominają przypadkowej klasyfikacji. Można zauważyć, że krzywa ROC dla zbioru treningowego jest dosyć bliska wartości 1. Na zbiorze testowym podobnie jak w przypadku zbioru testowego w Random Forest - jest wysoka specyficzność, natomiast czułość to 50%. Choć wartość ACC ma 87% to nie można uznać tego modelu za dobry. 
+
+#### Boosting
+
+Funkcja użyta do budowy modelu boostingu. 
+
+```{r, echo=T, message=FALSE, warning=FALSE, results = 'hide',fig.height=4, fig.width = 6, fig.align='center'}
+set.seed(123)
+boosting <- gbm::gbm(Status~.,data=train, n.trees = 600)
+summary(boosting, las = 2)
+```
+
+Przy użyciu 600 drzew najbardziej istotnymi zmiennymi są: `AppInc`, `Amount` oraz `C_Hist`. Jedynie zmienna `C_Hist` pokrywa się z wynikiem regresji logistycznej, choć nie jest to najsilniej dyskryminacyjna zmienna w przypadku boostingu.
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_boo_test <- predict(boosting, newdata = test, n.trees = 600, type="response")
+pred_boo_test <- ifelse(pred_boo_test>0.3, 1, 0)
+confM_test <- table(pred_boo_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_boo_train <- predict(boosting, newdata = train, n.trees = 600, type="response")
+pred_boo_train <- ifelse(pred_boo_train>0.3,1,0)
+confM_train <- table(pred_boo_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_boo_test))
+ROC_train <- roc(train$Status,as.numeric(pred_boo_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Boosting - test")
+ p2 <- plot(ROC_train,main="Boosting - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Boosting
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_boo_test <- data.frame(zbior = "testowy",metoda = "Boosting", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_boo_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_boo_train <- data.frame(zbior = "treningowy",metoda = "Boosting", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_boo_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Zbiór treningowy choć ma mniejsze ACC, to w ogólnym rozrachunku wypada lepiej, gdyż ma i czułość i specyficzność na dobrym poziomie, czego nie można powiedzieć o zbiorze testowym. Jego specyficzność jest duża, natomiast czułość to tylko 60%, choć biorąc pod uwagę wyniki poprzednich modeli to jest to najlepsza wartość.
+
+#### Naive Bayes
+
+Funkcja użyta do budowy modelu Naive Bayes.
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+set.seed(123)
+naive <- naiveBayes(as.factor(Status)~.,data=train)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_nb_test <- predict(naive, test)
+confM_test <- table(pred_nb_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_nb_train <- predict(naive, train)
+confM_train <- table(pred_nb_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_nb_test))
+ROC_train <- roc(train$Status,as.numeric(pred_nb_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Naive Bayes - test")
+ p2 <- plot(ROC_train,main="Naive Bayes - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Naive Bayes
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_nb_test <- data.frame(zbior = "testowy",metoda = "Naive Bayes", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_nb_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_nb_train <- data.frame(zbior = "treningowy",metoda = "Naive Bayes", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_nb_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Naive Bayes na zbiorze testowym i treningowym ma taką samą wartość specyficzności, natomiast na zbiorze treningowym czułość jest mniejsza niż 50%, co oznacza, że model jest bezużyteczy - losowa klasyfikacja. 
+
+Usunięcie wszystkich obserwacji, które zawierają brakujące wartości oraz outlierów nie daje zadowalających wyników, najprawdopodobniej z tego względu, że typ brakujących wartości nie jest typem MCAR - braki w obserwacjach są kompletnie przypadkowe. Prawdopodobnie jest to typ MAR lub MNAR, gdzie brak wartości może zależeć od innej zmiennej lub od zjawiska niezbadanego - na przykład osoby ankietowane, które zarabiają dużo mogą nie podawać wysokości swoich zarobków. Usunięcie takiego typu zmiennych zwyczajnie powoduje utratę ważnych informacji.
+
+### Prognozowanie brakujących wartości za pomocą k-najbliższych sąsiadów
+
+Zarówno regresja logistyczna jak i Boosting nie wykazaly istotnego wpływu zmiennej `Term`, więc zostanie ona usunięta z modelu, by nie zakłócać wyników wartościami odstającymi.
+
+Poniżej zostaną przedstawione wyniki modeli po imputacji wartości brakujących za pomocą metody 6-najbliższych sąsiadów. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Wczytanie danych
+kredyt <- read.csv("C:/Users/Esterka/Desktop/kredyt_indie.csv", sep = ";", dec = ".")
+#puste komórki na NA
+kredyt[kredyt==""] <- NA
+#usunięcie zmiennej Loan_ID
+kredyt <- kredyt[,-c(1,10)]
+colnames(kredyt) <- c("Gender", "Married","Dep", "Educ", "Self_Emp","AppInc", "CoappInc", "Amount", "C_Hist", "Prop_Ar", "Status")
+kredyt$Dep <- revalue(kredyt$Dep, c("3+"="3"))
+#zamiana zmienną endogeniczną na 0-1
+kredyt$Status <- ifelse(kredyt$Status=="Y",0,1)
+#usunięcie outlierów
+kredyt <- kredyt[-which(kredyt$AppInc>=10000),]
+kredyt <- kredyt[-which(kredyt$CoappInc>=5000),]
+kredyt <- kredyt[-which(kredyt$Amount>=250),]
+```
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt <- VIM::kNN(kredyt, k = 6)
+kredyt <- subset(kredyt, select = Gender:Status)
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+
+kredyt<-kredyt[sample(nrow(kredyt)),]
+
+#utworzenie 10 części o jednakowej wielkości
+folds <- cut(seq(1,nrow(kredyt)),breaks=10,labels=FALSE)
+
+#10-krotna walidacja krzyżowa
+for(i in 1:10){
+  #Podział danych na części za pomocą funkcji which()
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- kredyt[testIndexes, ]
+  train <- kredyt[-testIndexes, ]
+}
+```
+
+#### regresja logistyczna 
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+set.seed(8)
+logistic_regression <- glm(Status~., family = "binomial", data = train)
+```
+
+Poniżej przedstawiony jest najlepszy model regresji logistycznej po wyborze metodą krokową wsteczną.
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+logistic_regression_final <- step(logistic_regression, direction = "backward", trace=FALSE, k=3 ) 
+summary(logistic_regression_final)
+```
+
+W skład finalnego modelu weszły takie zmienne jak: `AppInc`, `CoappInc`, `Amount`, `Prop_Ar` oraz `C_Hist`, która ponownie jest najsilniej dyskryminacyjną zmienną.
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+#zbiór testowy
+prob_test <- predict(logistic_regression_final, test, type = "response")
+pred_rl_test <- ifelse(prob_test>0.3,1,0)
+confM_test <- table(pred_rl_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+prob_train <- predict(logistic_regression_final, train, type = "response")
+pred_rl_train <- ifelse(prob_train>0.3,1,0)
+confM_train <- table(pred_rl_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_rl_test))
+ROC_train <- roc(train$Status,as.numeric(pred_rl_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="regresja logistyczna - test")
+ p2 <- plot(ROC_train,main="regresja logistyczna - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu regresji logistycznej
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_rl_test <- data.frame(zbior = "testowy",metoda = "regresja logistyczna", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_rl_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_rl_train <- data.frame(zbior = "treningowy",metoda = "regresja logistyczna", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_rl_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Wynik czułości na zbiorze treningowym jest niska, gdyż wynosi 62%, na biorze testowym jest to 56%, czyli też bardzo mało. Oba zbiory mają wysoką wartość specyficzności - ponad 90%. Nie jest to jednak dobry model.
+
+
+#### Random Forest
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+oob = c()
+for(i in 1:500){
+  classifier <-  randomForest(as.factor(Status)~.,data = train,
+                              ntree = i)
+  oob[i] <- classifier$err.rate[nrow(classifier$err.rate), "OOB"]
+}
+opt_i <- which.min(oob)
+random_Forest <- randomForest::randomForest(as.factor(Status)~.,data = train, ntree = opt_i, keep.forest=TRUE,na.action=na.roughfix)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_rF_test <- predict(random_Forest, test, type = "response")
+confM_test <- table(pred_rF_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_rF_train <- predict(random_Forest, train, type = "response")
+confM_train <- table(pred_rF_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_rF_test))
+ROC_train <- roc(train$Status,as.numeric(pred_rF_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Random Forest - test")
+ p2 <- plot(ROC_train,main="Random Forest - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Random Forest
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_rF_test <- data.frame(zbior = "testowy",metoda = "Random Forest", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_rF_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_rF_train <- data.frame(zbior = "treningowy",metoda = "Random Forest", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_rF_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Zbiór treningowy wykazuje przeuczenie, ze względu na bardzo wysokie wyniki - prawie 100% dokładność. Zbiór testowy wypada gorzej ze względu na niską wartość czułości.
+
+#### Bagging
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+bagging <- ipred::bagging(Status~., data=train, nbag =500)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_bag_test <- predict(bagging, test, type = "class")
+pred_bag_test <- ifelse(pred_bag_test>0.3, 1, 0)
+confM_test <- table(pred_bag_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+prob_train <- predict(bagging, train, type = "class")
+pred_bag_train <- ifelse(prob_train>0.3,1,0)
+confM_train <- table(pred_bag_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_bag_test))
+ROC_train <- roc(train$Status,as.numeric(pred_bag_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Bagging - test")
+ p2 <- plot(ROC_train,main="Bagging - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu baggingu
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_bag_test <- data.frame(zbior = "testowy",metoda = "Bagging", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_bag_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_bag_train <- data.frame(zbior = "treningowy",metoda = "Bagging", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_bag_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Zbiór treningowy ma wartość AUC bliską 90%, wartość specyficzności to 95%, czułość natomiast jest na poziomie 82%, co biorąc pod uwagę inne modele poza Random Forest jest bardzo dobrym wynikiem. Zbiór testowy ma wysokość specyficzność, natomiast jego czułość to 56%. 
+
+#### Boosting
+
+```{r, echo=F, message=FALSE, warning=FALSE, results = 'hide', fig.align='center', fig.height=4, fig.width=6}
+set.seed(123)
+boosting <- gbm::gbm(Status~.,data=train, n.trees = 600)
+summary(boosting, las = 2)
+```
+Zmiennymi, które najsilniej dyskryminują są: `C_Hist`, `AppInc` oraz `Amount`.
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_boo_test <- predict(boosting, newdata = test, n.trees = 100, type="response")
+pred_boo_test <- ifelse(pred_boo_test>0.3, 1, 0)
+confM_test <- table(pred_boo_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_boo_train <- predict(boosting, newdata = train, n.trees = 100, type="response")
+pred_boo_train <- ifelse(pred_boo_train>0.3,1,0)
+confM_train <- table(pred_boo_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_boo_test))
+ROC_train <- roc(train$Status,as.numeric(pred_boo_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Boosting - test")
+ p2 <- plot(ROC_train,main="Boosting - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu boostingu
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_boo_test <- data.frame(zbior = "testowy",metoda = "Boosting", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_boo_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_boo_train <- data.frame(zbior = "treningowy",metoda = "Boosting", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_boo_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Czułość zarówno na zbiorze treningowym jak i testowym przyjmuje w dalszym ciągu niskie wartości - na zbiorze treningowym jest to 64%, natomiast na zbiorze testowym tylko 56%. Specyficzność na zbiorze testowym jest gorsza w porównaniu do innych modeli.
+
+#### Naive Bayes
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+naive <- naiveBayes(as.factor(Status)~.,data=train)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_nb_test <- predict(naive, test)
+confM_test <- table(pred_nb_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_nb_train <- predict(naive, train)
+confM_train <- table(pred_nb_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_nb_test))
+ROC_train <- roc(train$Status,as.numeric(pred_nb_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Naive Bayes - test")
+ p2 <- plot(ROC_train,main="Naive Bayes - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Naive Bayes
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_nb_test <- data.frame(zbior = "testowy",metoda = "Naive Bayes", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_nb_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_nb_train <- data.frame(zbior = "treningowy",metoda = "Naive Bayes", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_nb_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Wyniki na zbiorze testowym i treningowym są bardzo zbliżone, zbiór treningowy wykazuje się lepszą specyficznością, testowy natomiast ma wyższą czułość - lepiej rozpoznaje tych, którzy nie otrzymali kredytu.
+
+## Zamiana outlierów na NA
+
+W tym punkcie wszystkie wartości ze zmiennych `AppInc`, `CoappInc` oraz `Amount`, które mogłyby wprowadzać jakiekolwiek zakłocenia w zbiorze zostaną zamienione na NA i ich wartości zostaną zaprognozowane za pomocą metody 6-najbliższych sąsiadów.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Wczytanie danych
+kredyt <- read.csv("C:/Users/Esterka/Desktop/kredyt_indie.csv", sep = ";", dec = ".")
+#puste komórki na NA
+kredyt[kredyt==""] <- NA
+#usunięcie zmiennej Loan_ID
+kredyt <- kredyt[,-c(1,10)]
+colnames(kredyt) <- c("Gender", "Married","Dep", "Educ", "Self_Emp","AppInc", "CoappInc", "Amount", "C_Hist", "Prop_Ar", "Status")
+kredyt$Dep <- revalue(kredyt$Dep, c("3+"="3"))
+#zamiana zmienną endogeniczną na 0-1
+kredyt$Status <- ifelse(kredyt$Status=="Y",0,1)
+```
+
+```{r, echo=T, message=FALSE, warning=FALSE}
+kredyt[which(kredyt$AppInc>=10000),6] <- NA
+kredyt[which(kredyt$CoappInc>=5000),7] <- NA
+kredyt[which(kredyt$Amount>=250),8] <- NA
+```
+
+
+### Prognozowanie brakujących wartości za pomocą k-najbliższych sąsiadów
+
+Brakujące wartości w zbiorze zostaną imputowane za pomocą metody 6-najbliższych sąsiadów. Zmienna `Term` nie będzie uwzględniana w modelach.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Wczytanie danych
+kredyt <- read.csv("C:/Users/Esterka/Desktop/kredyt_indie.csv", sep = ";", dec = ".")
+#puste komórki na NA
+kredyt[kredyt==""] <- NA
+#usunięcie zmiennej Loan_ID
+kredyt <- kredyt[,-c(1,10)]
+colnames(kredyt) <- c("Gender", "Married","Dep", "Educ", "Self_Emp","AppInc", "CoappInc", "Amount",  "C_Hist", "Prop_Ar", "Status")
+kredyt$Dep <- revalue(kredyt$Dep, c("3+"="3"))
+#zamiana zmienną endogeniczną na 0-1
+kredyt$Status <- ifelse(kredyt$Status=="Y",0,1)
+#zamiana outlierów na NA
+kredyt[which(kredyt$AppInc>=10000),6] <- NA
+kredyt[which(kredyt$CoappInc>=5000),7] <- NA
+kredyt[which(kredyt$Amount>=250),8] <- NA
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+kredyt <- VIM::kNN(kredyt, k = 6)
+kredyt <- subset(kredyt, select = Gender:Status)
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+
+kredyt<-kredyt[sample(nrow(kredyt)),]
+
+#utworzenie 10 części o jednakowej wielkości
+folds <- cut(seq(1,nrow(kredyt)),breaks=10,labels=FALSE)
+
+#10-krotna walidacja krzyżowa
+for(i in 1:10){
+  #Podział danych na części za pomocą funkcji which()
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- kredyt[testIndexes, ]
+  train <- kredyt[-testIndexes, ]
+}
+```
+
+#### regresja logistyczna 
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+
+logistic_regression <- glm(Status~., family = "binomial", data = train)
+```
+
+Poniżej przedstawiony jest najlepszy model regresji logistycznej po wyborze metodą krokową wsteczną.
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+logistic_regression_final <- step(logistic_regression, direction = "backward", trace=FALSE, k=3 ) 
+summary(logistic_regression_final)
+```
+
+W skład finalnego modelu weszły takie zmienne jak: `AppInc`, `CoappInc`, `Amount`, `Prop_Ar` oraz `C_Hist`, która ponownie jest najsilniej dyskryminacyjną zmienną.
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+#zbiór testowy
+prob_test <- predict(logistic_regression_final, test, type = "response")
+pred_rl_test <- ifelse(prob_test>0.3,1,0)
+confM_test <- table(pred_rl_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+prob_train <- predict(logistic_regression_final, train, type = "response")
+pred_rl_train <- ifelse(prob_train>0.3,1,0)
+confM_train <- table(pred_rl_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_rl_test))
+ROC_train <- roc(train$Status,as.numeric(pred_rl_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="regresja logistyczna - test")
+ p2 <- plot(ROC_train,main="regresja logistyczna - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu regresji logistycznej
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_rl_test <- data.frame(zbior = "testowy",metoda = "regresja logistyczna", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_rl_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_rl_train <- data.frame(zbior = "treningowy",metoda = "regresja logistyczna", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_rl_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Wyniki regresji logistycznej na zbiorze testowym są o wiele lepsze niż na zbiorze treningowym, co jest zaskakujące, gdyż wyniki na zbiorze testowym powinny być niższe, ze względu na to, że są to obserwacje wcześniej nieznane. Jest bardzo niska czułość na zbiorze treningowym - 56%, przy czym na zbiorze testowym wynosi ona 65%. Specyficzność też jest znacznie większa. Wartość AUC - pole pod krzywą ROC na zbiorze testowym wynosi 81%, na zbiorze trengowym zaś 74%.
+
+#### Random Forest
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+oob = c()
+for(i in 1:500){
+  classifier <-  randomForest(as.factor(Status)~.,data = train,
+                              ntree = i)
+  oob[i] <- classifier$err.rate[nrow(classifier$err.rate), "OOB"]
+}
+opt_i <- which.min(oob)
+random_Forest <- randomForest::randomForest(as.factor(Status)~.,data = train, ntree = opt_i, keep.forest=TRUE,na.action=na.roughfix)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_rF_test <- predict(random_Forest, test, type = "response")
+confM_test <- table(pred_rF_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_rF_train <- predict(random_Forest, train, type = "response")
+confM_train <- table(pred_rF_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_rF_test))
+ROC_train <- roc(train$Status,as.numeric(pred_rF_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Random Forest - test")
+ p2 <- plot(ROC_train,main="Random Forest - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Random Forest
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_rF_test <- data.frame(zbior = "testowy",metoda = "Random Forest", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_rF_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_rF_train <- data.frame(zbior = "treningowy",metoda = "Random Forest", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_rF_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Model Random Forest również w tej sytuacji wydaje się być przeuczony. Ma bardzo wysokie wartości na zbiorze treningowym. Jeśli chodzi o zbiór testowy, wartość czułości na zbiorze testowym jest mniejsza niż 50%, co oznacza, że model jest bezużyteczny.
+
+#### Bagging
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+bagging <- ipred::bagging(Status~., data=train, nbag =500)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_bag_test <- predict(bagging, test, type = "class")
+pred_bag_test <- ifelse(pred_bag_test>0.3, 1, 0)
+confM_test <- table(pred_bag_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+prob_train <- predict(bagging, train, type = "class")
+pred_bag_train <- ifelse(prob_train>0.3,1,0)
+confM_train <- table(pred_bag_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_bag_test))
+ROC_train <- roc(train$Status,as.numeric(pred_bag_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Bagging - test")
+ p2 <- plot(ROC_train,main="Bagging - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu baggingu
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_bag_test <- data.frame(zbior = "testowy",metoda = "Bagging", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_bag_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_bag_train <- data.frame(zbior = "treningowy",metoda = "Bagging", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_bag_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Model baggingu na zbiorze treningowym wypada dobrze, natomiast w przypadku zbioru testowego pojawia się taki sam problem jak w innych modelach - zzbyt niska wartość czułości. 
+
+#### Boosting
+
+```{r, echo=F, message=FALSE, warning=FALSE, results = 'hide', fig.align='center', fig.height=4, fig.width=6}
+set.seed(123)
+boosting <- gbm::gbm(Status~.,data=train, n.trees = 600)
+par(mar = c(5, 8, 1, 1))
+summary(boosting, las = 2)
+```
+
+Zmiennymi, które najsilniej dyskryminuje są: `C_Hist`, `AppInc` oraz `Amount`.
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_boo_test <- predict(boosting, newdata = test, n.trees = 100, type="response")
+pred_boo_test <- ifelse(pred_boo_test>0.3, 1, 0)
+confM_test <- table(pred_boo_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_boo_train <- predict(boosting, newdata = train, n.trees = 100, type="response")
+pred_boo_train <- ifelse(pred_boo_train>0.3,1,0)
+confM_train <- table(pred_boo_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_boo_test))
+ROC_train <- roc(train$Status,as.numeric(pred_boo_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Boosting - test")
+ p2 <- plot(ROC_train,main="Boosting - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu boostingu
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_boo_test <- data.frame(zbior = "testowy",metoda = "Boosting", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_boo_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_boo_train <- data.frame(zbior = "treningowy",metoda = "Boosting", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_boo_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Zbiór trengowy wykazuje się 82% dokładnością, natomiast jego czułość - 67% jest niezadowalająca. W zbiorze testowym, występuje problem niskiej czułości. Model jest słaby.
+
+#### Naive Bayes
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+set.seed(123)
+naive <- naiveBayes(as.factor(Status)~.,data=train)
+```
+
+Poniżej przedstawione są macierze błędu oraz wykresy krzywej ROC zarówno dla zbioru testowego jak i treningowego.
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_nb_test <- predict(naive, test)
+confM_test <- table(pred_nb_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_nb_train <- predict(naive, train)
+confM_train <- table(pred_nb_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_nb_test))
+ROC_train <- roc(train$Status,as.numeric(pred_nb_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Naive Bayes - test")
+ p2 <- plot(ROC_train,main="Naive Bayes - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+##### Wyniki modelu Naive Bayes
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_nb_test <- data.frame(zbior = "testowy",metoda = "Naive Bayes", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_nb_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_nb_train <- data.frame(zbior = "treningowy",metoda = "Naive Bayes", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_nb_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Model Naive Bayes jest za słaby, wartości czułości są mniejsze niż 50%.
+
+#### Boosting na podstawie zmiennej `C_Hist`, `AppInc`, `Amount` przy usunięciu NA i outlierów
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Wczytanie danych
+kredyt <- read.csv("C:/Users/Esterka/Desktop/kredyt_indie.csv", sep = ";", dec = ".")
+#puste komórki na NA
+kredyt[kredyt==""] <- NA
+#usunięcie zmiennej Loan_ID
+kredyt <- kredyt[,c(7,9,11,13)]
+colnames(kredyt) <- c("AppInc", "Amount", "C_Hist", "Status")
+#zamiana zmienną endogeniczną na 0-1
+kredyt$Status <- ifelse(kredyt$Status=="Y",0,1)
+#usunięcie outlierów
+kredyt <- kredyt[-which(kredyt$AppInc>=10000),]
+kredyt <- kredyt[-which(kredyt$Amount>=250),]
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+kredyt <- na.omit(kredyt)
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE, results = 'hide',fig.height=4, fig.width = 6, fig.align='center'}
+
+set.seed(123)
+
+kredyt<-kredyt[sample(nrow(kredyt)),]
+
+#utworzenie 10 części o jednakowej wielkości
+folds <- cut(seq(1,nrow(kredyt)),breaks=10,labels=FALSE)
+
+#10-krotna walidacja krzyżowa
+for(i in 1:10){
+  #Podział danych na części za pomocą funkcji which()
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- kredyt[testIndexes, ]
+  train <- kredyt[-testIndexes, ]
+}
+set.seed(123)
+boosting <- gbm::gbm(Status~.,data=train, n.trees = 600)
+summary(boosting, las = 2)
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE,fig.align = 'center', fig.height = 3, fig.width = 6}
+pred_boo_test <- predict(boosting, newdata = test, n.trees = 100, type="response")
+pred_boo_test <- ifelse(pred_boo_test>0.3, 1, 0)
+confM_test <- table(pred_boo_test, test$Status)
+confM_test
+acc_test = (confM_test[2,2]+confM_test[1,1])/sum(confM_test)
+sen_test = caret::sensitivity(confM_test)
+spec_test = caret::specificity(confM_test)
+
+#zbiór treningowy
+pred_boo_train <- predict(boosting, newdata = train, n.trees = 100, type="response")
+pred_boo_train <- ifelse(pred_boo_train>0.3,1,0)
+confM_train <- table(pred_boo_train, train$Status)
+confM_train
+acc_train = (confM_train[2,2]+confM_train[1,1])/sum(confM_train)
+sen_train = caret::sensitivity(confM_train)
+spec_train = caret::specificity(confM_train)
+ROC_test <- roc(test$Status,as.numeric(pred_boo_test))
+ROC_train <- roc(train$Status,as.numeric(pred_boo_train))
+par(mfrow=c(1,2))
+ p1 <- plot(ROC_test,main="Boosting - test")
+ p2 <- plot(ROC_train,main="Boosting - train")
+ auc_test <- auc(p1)
+ auc_train <- auc(p2)
+```
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+results_boo_test <- data.frame(zbior = "testowy",metoda = "Boosting", dokladnosc = round(acc_test,2), specyficznosc = round(sen_test,2), czulosc = round(spec_test,2), AUC = round(auc_test,2))
+results_boo_test %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+
+results_boo_train <- data.frame(zbior = "treningowy",metoda = "Boosting", dokladnosc = round(acc_train,2), specyficznosc = round(sen_train,2), czulosc = round(spec_train,2), AUC = round(auc_train,2))
+results_boo_train %>% kable %>% kable_styling(full_width = F, position = "center", font_size = 10)
+```
+
+Po zostawieniu tylko 3 najistotniejszych zmiennych w modelu Boosting wyniki się nie poprawiły, a nawet pogorszyły. Czułość na zbiorze testowym to 44% co jest fatalnym wynikiem.
+
+# Podsumowanie
+Podsumowując, żaden z modeli nie okazał się być znakomity. Bardzo dużym problemem w niemal każdym modelu okazywała się niska czułość, niemalże losowa klasyfikacja zajścia zdarzenia prawdziwego. Najlepszy wynik uzyskał model Boosting przy usunięciu NA i outlierów, a ogólnie najlepiej wypadło usunięcie outlierów i uzupełnienie NA metodą knn. Bardzo dużo modeli miało czułość mniejszą od 50% co wskazuje na bezużyteczność modelu. Gdyby wziąć pod uwagę tylko ACC czy AUC to wyniki nie byłyby tak złe, jednak model, który poprawnie klasyfikuje tylko częste zdarzenia nie jest do niczego potrzebny.
+Aby ulepszyć ten projekt, możnaby sprawdzić najpierw typ brakujących wartości, może zasięgnąć porady eksperta odnośnie modyfikacji zmiennych.
